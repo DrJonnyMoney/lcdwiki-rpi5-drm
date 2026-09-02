@@ -78,6 +78,20 @@ sudo apt install -y raspberrypi-kernel-headers build-essential curl
 
 The current MHS3528 installer intentionally checks for a `6.12.x` kernel because that is the kernel series on which the custom module was validated.
 
+## Optional touch testing and calibration tools
+
+For touchscreen testing and calibration, install:
+
+```bash
+sudo apt install -y evtest python3-pygame python3-evdev
+```
+
+These packages are only needed during setup, troubleshooting or calibration; they are not required for normal display or touchscreen operation once configuration is complete.
+
+- `evtest` displays the raw ADS7846/XPT2046 touch events and is useful for checking axis direction and coordinate range.
+- `python3-pygame` is used by the 3×3 touchscreen calibration utility.
+- `python3-evdev` allows the calibration utility to read the Linux touchscreen input device directly.
+
 # Installation
 
 Clone the repository:
