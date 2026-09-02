@@ -18,6 +18,12 @@ p.write_text(s.rstrip()+"\n")
 PY
 
 rm -f /boot/firmware/overlays/lcdwiki-touch.dtbo
+rm -f /boot/firmware/overlays/lcdwiki-mhs3528-native.dtbo
 rm -f /lib/firmware/panel.bin
-echo "Removed lcdwiki-rpi5-drm managed configuration."
+
+KVER="$(uname -r)"
+rm -f "/lib/modules/$KVER/extra/mhs3528_drm.ko"
+depmod -a || true
+
+echo "Removed lcdwiki-rpi5-drm managed configuration and installed driver files."
 echo "Reboot recommended."

@@ -22,13 +22,6 @@ BOOTCFG="/boot/firmware/config.txt"
 [[ -f "$BOOTCFG" ]] || { echo "Expected $BOOTCFG (Raspberry Pi OS Bookworm)."; exit 1; }
 command -v dtc >/dev/null || { echo "Install: sudo apt install device-tree-compiler"; exit 1; }
 
-echo "Compiling touch overlay..."
-dtc -@ -I dts -O dtb -o /tmp/lcdwiki-touch.dtbo "$P/touch-overlay.dts"
-install -m 0644 /tmp/lcdwiki-touch.dtbo /boot/firmware/overlays/lcdwiki-touch.dtbo
-
-echo "Installing selected panel firmware..."
-install -m 0644 "$P/panel.bin" /lib/firmware/panel.bin
-
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP="${BOOTCFG}.lcdwiki-backup-${STAMP}"
 cp "$BOOTCFG" "$BACKUP"
@@ -37,7 +30,7 @@ echo "Boot config backup: $BACKUP"
 BEGIN="# BEGIN lcdwiki-rpi5-drm"
 END="# END lcdwiki-rpi5-drm"
 
-# Remove our previous managed block if present.
+# Remove any previous block managed by this project.
 python3 - "$BOOTCFG" "$BEGIN" "$END" <<'PY'
 import sys
 from pathlib import Path
@@ -49,6 +42,57 @@ while begin in s and end in s:
 p.write_text(s.rstrip()+"\n")
 PY
 
+if [[ "$PROFILE" == "lcdwiki28" ]]; then
+  echo "Compiling LCDWiki 2.8-inch touch overlay..."
+  dtc -@ -I dts -O dtb -o /tmp/lcdwiki-touch.dtbo "$P/touch-overlay.dts"
+  install -m 0644 /tmp/lcdwiki-touch.dtbo /boot/firmware/overlays/lcdwiki-touch.dtbo
+
+  echo "Installing ILI9341 panel firmware..."
+  install -m 0644 "$P/panel.bin" /lib/firmware/panel.bin
+
+else
+  KVER="$(uname -r)"
+  KBUILD="/lib/modules/$KVER/build"
+  DRIVER="$P/driver"
+  URL="https://raw.githubusercontent.com/raspberrypi/linux/rpi-6.12.y/drivers/gpu/drm/tiny/ili9486.c"
+
+  [[ "$KVER" == 6.12.* ]] || {
+    echo "MHS3528 profile is currently validated against Raspberry Pi kernel 6.12.x."
+    echo "Running kernel: $KVER"
+    exit 1
+  }
+  [[ -d "$KBUILD" ]] || {
+    echo "Kernel headers not found. Install: sudo apt install raspberrypi-kernel-headers"
+    exit 1
+  }
+  command -v curl >/dev/null || { echo "Install: sudo apt install curl"; exit 1; }
+  command -v make >/dev/null || { echo "Install: sudo apt install build-essential"; exit 1; }
+
+  WORK="$(mktemp -d)"
+  trap 'rm -rf "$WORK"' EXIT
+  cp "$DRIVER/Makefile" "$WORK/Makefile"
+  cp "$DRIVER/make_mhs3528.py" "$WORK/make_mhs3528.py"
+
+  echo "Fetching Raspberry Pi ILI9486 DRM source..."
+  curl -L --fail "$URL" -o "$WORK/ili9486-upstream.c"
+
+  echo "Generating LCDWiki MHS3528 board-specific DRM driver..."
+  python3 "$WORK/make_mhs3528.py" "$WORK/ili9486-upstream.c" "$WORK/mhs3528_drm.c"
+
+  echo "Building MHS3528 DRM module for $KVER..."
+  make -C "$KBUILD" M="$WORK" modules
+
+  MODDIR="/lib/modules/$KVER/extra"
+  mkdir -p "$MODDIR"
+  install -m 0644 "$WORK/mhs3528_drm.ko" "$MODDIR/mhs3528_drm.ko"
+  depmod -a
+
+  echo "Compiling MHS3528 display + touch overlay..."
+  dtc -@ -I dts -O dtb -o /tmp/lcdwiki-mhs3528-native.dtbo "$P/overlay.dts"
+  install -m 0644 /tmp/lcdwiki-mhs3528-native.dtbo \
+    /boot/firmware/overlays/lcdwiki-mhs3528-native.dtbo
+fi
+
 {
   echo
   echo "$BEGIN"
@@ -58,8 +102,9 @@ PY
 
 echo
 echo "Installed profile: $PROFILE"
-if [[ "$PROFILE" == "mhs3528" ]]; then
-  echo "NOTE: MHS3528 profile is derived from published wiring and Linux ILI9486 init"
-  echo "      and still requires hardware validation."
+if [[ "$PROFILE" == "lcdwiki28" ]]; then
+  echo "Expected DRM output after reboot: SPI-1, 320x240 @ 60 Hz"
+else
+  echo "Expected DRM output after reboot: SPI-1, 480x320 @ ~60 Hz"
 fi
 echo "Reboot: sudo reboot"

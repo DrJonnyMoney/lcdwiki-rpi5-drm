@@ -2,74 +2,166 @@
 
 ## Purpose
 
-This project modernises LCDWiki SPI displays for Raspberry Pi 5 / Raspberry Pi OS Bookworm by using the normal Linux DRM/KMS stack rather than replacing it with a legacy framebuffer/Xorg configuration.
+This project modernises selected LCDWiki SPI touch displays for Raspberry Pi 5 / Raspberry Pi OS Bookworm by retaining the normal Linux DRM/KMS + Wayland graphics stack instead of installing LCDWiki's legacy framebuffer/Xorg environment.
 
-## Validated 2.8-inch path
+Two physical displays have been validated:
 
-The 2.8-inch ILI9341-class + ADS7846/XPT2046 board was developed and tested interactively.
+- LCDWiki 2.8-inch RPi Display, ILI9341-class + ADS7846/XPT2046;
+- LCDWiki MHS-3.5inch RPi Display (MHS3528), ILI9486 + XPT2046.
 
-The vendor overlay first established that the Pi 5 kernel could communicate with both hardware devices:
+## 2.8-inch development path
 
-```text
-fb_ili9340 ... 320x240
-ads7846 spi0.1: touchscreen
-```
+The vendor framebuffer overlay first confirmed communication with both hardware devices. A native attempt using the dedicated tiny ILI9341 DRM driver then created a DRM connector, but exposed a malformed mode near 0.013 Hz. The desktop therefore appeared to update extremely slowly even though SPI communication itself was functional.
 
-A DRM attempt with the dedicated tiny ILI9341 driver then created `SPI-1`, but exposed an unusable mode near 0.013 Hz. `modetest` confirmed the mode timing rather than Bluetooth/input handling was responsible for multi-second-to-minute apparent UI freezes.
-
-Moving the panel to Raspberry Pi's `mipi-dbi-spi` overlay and Linux `panel-mipi-dbi` changed the output to:
+Moving the LCD to Raspberry Pi's `mipi-dbi-spi` overlay and Linux `panel-mipi-dbi` produced a normal userspace mode:
 
 ```text
+SPI-1
 320x240 @ 60 Hz
 ```
 
-The touch controller was kept independent on SPI0 CE1 with a small custom ADS7846 Device Tree overlay.
+Touch remained independent on SPI0 CE1 using the stock `ads7846` input driver. Device Tree handles axis orientation; labwc/libinput applies the final affine calibration.
 
-Fine touch calibration was moved to labwc/libinput, while Device Tree retained hardware wiring and orientation.
+Validated fine calibration:
 
-## MHS3528 adaptation
+```text
+1.150 0 -0.111 0 1.137 -0.060
+```
 
-LCDWiki publishes the MHS3528 as:
+## MHS3528 hardware
 
-- physical resolution 320×480;
+The tested LCDWiki MHS3528 uses:
+
 - ILI9486 LCD controller;
 - XPT2046 touch controller;
-- SPI interface;
-- LCD CS physical pin 24 (SPI0 CE0);
-- touch CS physical pin 26 (SPI0 CE1);
-- LCD D/C/RS physical pin 18 (GPIO24);
-- LCD reset physical pin 22 (GPIO25);
-- touch IRQ physical pin 11 (GPIO17).
+- physical resolution 320×480;
+- landscape DRM mode 480×320;
+- LCD CS on SPI0 CE0 / GPIO8;
+- touch CS on SPI0 CE1 / GPIO7;
+- LCD D/C on GPIO24;
+- LCD reset on GPIO25;
+- touch IRQ on GPIO17.
 
-For landscape use the project presents the panel as 480×320.
+LCDWiki's legacy MHS35 overlay configures the display as an ILI9486 with 8-bit SPI bus transfers and 16-bit register semantics. The legacy `fb_ili9486` path successfully drove the physical display and therefore served as the hardware reference while developing the native DRM profile.
 
-The existing LCDWiki `MHS35-show` script still configures its own `mhs35` overlay and legacy-style framebuffer/HDMI/Xorg behaviour. The modern profile avoids those components.
+## Why generic panel-mipi-dbi was not sufficient for MHS3528
 
-The ILI9486 panel init used here is derived from Raspberry Pi Linux's `fb_ili9486` PiScreen sequence. That driver defines RGB565 mode, power/VCOM and gamma setup appropriate to an ILI9486 PiScreen-class panel. A landscape address-mode command is added for the MHS3528 profile.
+A generic `panel-mipi-dbi` profile could create a valid `SPI-1` DRM output at 480×320 and detect touch, but the physical panel remained blank.
 
-This is technically a strong candidate because the hardware controller, wiring and init sequence are documented. It is nevertheless labelled **hardware-unverified** until the MHS3528 profile is booted on a physical panel and the following are confirmed:
+The MHS3528 therefore uses a board-specific native DRM module derived from Raspberry Pi's tiny ILI9486 driver. The module preserves the controller-specific command transport while substituting LCDWiki's known-good initialization sequence and a sane userspace DRM mode.
 
-1. panel initializes without colour corruption;
-2. 480×320 DRM mode is stable;
-3. orientation is correct;
-4. ADS7846 touch is detected;
-5. touch transform is calibrated;
-6. stable SPI ceiling is measured.
+The module is separate from the kernel's stock `ili9486.ko` and binds only to:
 
-## Why the architecture generalises
+```text
+lcdwiki,mhs3528
+```
 
-The reusable pieces are not controller-specific hacks. Linux already provides:
+## Critical reset-polarity finding
 
-- generic `panel-mipi-dbi`;
-- generic ADS7846/XPT2046 input support;
-- DRM/KMS;
-- Wayland/labwc.
+The decisive fault was not the LCD initialization sequence or DRM mode. It was reset GPIO polarity.
 
-Each board profile supplies only:
+LCDWiki's legacy Device Tree overlay represents reset polarity using conventions from the older framebuffer driver. Copying its flag directly into a modern gpiod/mipi-dbi driver caused the helper to end with the physical reset line low.
 
-- physical geometry;
-- reset/DC GPIOs;
-- panel initialization commands;
-- touch wiring/orientation/calibration.
+That produced a deceptive state:
 
-That makes additional LCDWiki SPI panels candidates for the same profile-based approach.
+```text
+custom DRM driver bound
+vendor init commands executed
+DRM framebuffer created
+480x320 @ ~60 Hz exposed to Wayland
+physical LCD remained blank
+```
+
+The working modern property is:
+
+```dts
+reset-gpios = <&gpio 25 0>;
+```
+
+With this setting, `mipi_dbi_hw_reset()` produces the required physical transition:
+
+```text
+RESET low -> RESET high
+```
+
+and leaves the controller released from reset.
+
+After this change the MHS3528 displayed the Wayland desktop correctly.
+
+## Validated MHS3528 result
+
+The working system reports:
+
+```text
+[drm] Initialized mhs3528 1.0.0 for spi0.0
+MHS3528: hardware reset complete
+MHS3528: vendor init complete
+[drm] fb0: mhs3528drmfb frame buffer device
+```
+
+and:
+
+```text
+SPI-1
+Physical size: 73x49 mm
+480x320 px, 59.997002 Hz
+```
+
+Touch is detected as:
+
+```text
+ADS7846 Touchscreen
+```
+
+Device Tree applies:
+
+```dts
+touchscreen-swapped-x-y;
+touchscreen-inverted-y;
+```
+
+Validated labwc/libinput fine calibration:
+
+```text
+1.115 0 -0.052 0 1.106 -0.035
+```
+
+## Architecture
+
+### 2.8-inch
+
+```text
+SPI0 CE0
+  -> mipi-dbi-spi
+  -> panel-mipi-dbi
+  -> DRM/KMS
+  -> Wayland/labwc
+
+SPI0 CE1
+  -> ADS7846/XPT2046
+  -> Linux input
+  -> libinput
+  -> labwc
+```
+
+### MHS3528
+
+```text
+SPI0 CE0
+  -> lcdwiki,mhs3528
+  -> board-specific native ILI9486 DRM module
+  -> DRM/KMS
+  -> Wayland/labwc
+
+SPI0 CE1
+  -> ADS7846/XPT2046
+  -> Linux input
+  -> libinput
+  -> labwc
+```
+
+## Practical outcome
+
+Both displays now operate without replacing the Raspberry Pi 5's modern desktop stack. This preserves normal Wayland behaviour, native DRM output enumeration and session mirroring while still supporting the resistive touchscreen.
+
+The project also demonstrates an important migration lesson for older Raspberry Pi display overlays: GPIO polarity flags from legacy drivers must not be assumed to have identical semantics when ported to modern descriptor-based GPIO APIs.
