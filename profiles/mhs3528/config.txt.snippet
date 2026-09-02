@@ -1,0 +1,7 @@
+# LCDWiki MHS3528 3.5" RPi Display
+dtparam=spi=on
+dtoverlay=mipi-dbi-spi,spi0-0,speed=32000000
+dtparam=width=480,height=320
+dtparam=width-mm=73,height-mm=49
+dtparam=reset-gpio=25,dc-gpio=24
+dtoverlay=lcdwiki-touch

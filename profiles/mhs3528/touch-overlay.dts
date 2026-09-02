@@ -1,0 +1,38 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * LCDWiki MHS3528 touch-only overlay.
+ * XPT2046 is Linux-compatible with the ADS7846 driver.
+ * SPI0 CE1, IRQ GPIO17.
+ *
+ * Fine calibration and any required orientation correction should be
+ * performed in labwc/libinput after testing the individual panel.
+ */
+
+/ {
+    compatible = "brcm,bcm2712", "brcm,bcm2835";
+
+    fragment@0 {
+        target = <&spi0>;
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            touchscreen@1 {
+                compatible = "ti,ads7846";
+                reg = <1>;
+                spi-max-frequency = <2000000>;
+
+                interrupt-parent = <&gpio>;
+                interrupts = <17 2>;
+                pendown-gpio = <&gpio 17 1>;
+
+                ti,x-plate-ohms = /bits/ 16 <60>;
+                ti,pressure-max = /bits/ 16 <255>;
+
+                status = "okay";
+            };
+        };
+    };
+};
