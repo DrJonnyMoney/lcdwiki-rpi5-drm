@@ -1,0 +1,7 @@
+  <touch deviceName="ADS7846 Touchscreen" mapToOutput="SPI-1" mouseEmulation="yes" />
+
+  <libinput>
+    <device category="ADS7846 Touchscreen">
+      <calibrationMatrix>1.115 0 -0.052 0 1.106 -0.035</calibrationMatrix>
+    </device>
+  </libinput>

@@ -44,7 +44,7 @@ LCDWiki MHS3528 3.5"
   SPI0 CE1 -> ads7846 -> libinput
 ```
 
-The MHS3528 cannot simply use the same `panel-mipi-dbi` profile as the 2.8-inch unit. Its working LCDWiki configuration uses ILI9486-specific 16-bit register semantics, so this repository builds a small board-specific DRM module from Raspberry Pi's native ILI9486 driver and applies the LCDWiki MHS3528 initialization sequence.
+The MHS3528 cannot use the same generic `panel-mipi-dbi` transport as the 2.8-inch unit. A clean hardware retest with the corrected reset polarity showed that `panel-mipi-dbi` binds successfully and exposes a valid `SPI-1` output at 480×320 @ 60 Hz, but the physical LCD remains white. The PiScreen-style ILI9486 hardware uses board-specific 16-bit command/register transport, so this repository builds a small board-specific DRM module from Raspberry Pi's native ILI9486 driver and applies the LCDWiki MHS3528 initialization sequence.
 
 ## Why not run LCDWiki `LCD-show` / `MHS35-show` directly?
 
@@ -78,7 +78,7 @@ sudo apt install -y raspberrypi-kernel-headers build-essential curl
 
 The current MHS3528 installer intentionally checks for a `6.12.x` kernel because that is the kernel series on which the custom module was validated.
 
-## Optional touch testing and calibration tools
+## Optional touch verification and recalibration tools
 
 For touchscreen testing and calibration, install:
 
@@ -194,9 +194,25 @@ This was the final issue preventing the native MHS3528 DRM driver from displayin
 
 # Touchscreen
 
-Both validated units use the Linux `ads7846` driver for their XPT2046-compatible resistive touchscreen.
+Both validated units use the Linux `ads7846` driver for their XPT2046-compatible resistive touchscreen. The installer now applies the measured touch mapping and calibration automatically.
 
-Confirm detection with:
+The default is installed system-wide in:
+
+```text
+/etc/xdg/labwc/rc.xml
+```
+
+This means users who rely on the normal Raspberry Pi OS labwc configuration inherit a working touchscreen automatically. labwc searches a user's own `~/.config/labwc/rc.xml` before the system configuration, so the installer also updates any existing per-user labwc files it finds under `/home` while preserving their other settings. A user can still change or remove the LCDWiki block later as a personal override.
+
+The installer backs up every labwc file before changing it and marks its additions with:
+
+```text
+<!-- BEGIN lcdwiki-rpi5-drm touch -->
+...
+<!-- END lcdwiki-rpi5-drm touch -->
+```
+
+Confirm touch detection with:
 
 ```bash
 libinput list-devices | grep -A15 -i ADS7846
@@ -209,53 +225,23 @@ Device:           ADS7846 Touchscreen
 Capabilities:     touch
 ```
 
-The Device Tree profiles handle the coarse touch orientation. Fine calibration is applied in labwc.
+The Device Tree profiles handle coarse touch orientation. labwc/libinput applies the validated fine calibration.
 
-## labwc touch mapping
+## Installed calibration defaults
 
-Edit:
+2.8-inch:
 
 ```text
-~/.config/labwc/rc.xml
+1.150 0 -0.111 0 1.137 -0.060
 ```
 
-### Validated 2.8-inch configuration
+MHS3528 3.5-inch:
 
-```xml
-<?xml version="1.0"?>
-
-<labwc_config>
-    <touch deviceName="ADS7846 Touchscreen"
-           mapToOutput="SPI-1"
-           mouseEmulation="yes" />
-
-    <libinput>
-        <device category="ADS7846 Touchscreen">
-            <calibrationMatrix>1.150 0 -0.111 0 1.137 -0.060</calibrationMatrix>
-        </device>
-    </libinput>
-</labwc_config>
+```text
+1.115 0 -0.052 0 1.106 -0.035
 ```
 
-### Validated MHS3528 3.5-inch configuration
-
-```xml
-<?xml version="1.0"?>
-
-<labwc_config>
-    <touch deviceName="ADS7846 Touchscreen"
-           mapToOutput="SPI-1"
-           mouseEmulation="yes" />
-
-    <libinput>
-        <device category="ADS7846 Touchscreen">
-            <calibrationMatrix>1.115 0 -0.052 0 1.106 -0.035</calibrationMatrix>
-        </device>
-    </libinput>
-</labwc_config>
-```
-
-These matrices were measured on the two physical test units. Resistive panels vary, so another unit may still benefit from its own calibration.
+These matrices were measured on the two physical test units. They are used as the normal model defaults; recalibration is only needed if another unit is noticeably offset.
 
 ## Recalibrating another panel
 
@@ -270,7 +256,7 @@ Use:
 - `320` × `240` for the 2.8-inch display
 - `480` × `320` for the MHS3528
 
-Tap the nine targets carefully with a stylus and use the resulting raw coordinates to derive a new libinput affine matrix.
+Tap the nine targets carefully with a stylus and use the resulting raw coordinates to derive a replacement libinput affine matrix.
 
 # Desktop scaling
 
@@ -318,16 +304,19 @@ profiles/
     panel.txt
     panel.bin
     touch-overlay.dts
+    labwc-touch.xml
     config.txt.snippet
 
   mhs3528/
     overlay.dts
+    labwc-touch.xml
     config.txt.snippet
     driver/
       Makefile
       make_mhs3528.py
 
 tools/
+  patch_labwc.py
   touch_calibrate_grid.py
 
 docs/

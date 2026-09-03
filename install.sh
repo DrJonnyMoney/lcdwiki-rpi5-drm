@@ -18,6 +18,8 @@ esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 P="$ROOT/profiles/$PROFILE"
 BOOTCFG="/boot/firmware/config.txt"
+LABWC_GLOBAL="/etc/xdg/labwc/rc.xml"
+LABWC_FRAGMENT="$P/labwc-touch.xml"
 
 [[ -f "$BOOTCFG" ]] || { echo "Expected $BOOTCFG (Raspberry Pi OS Bookworm)."; exit 1; }
 command -v dtc >/dev/null || { echo "Install: sudo apt install device-tree-compiler"; exit 1; }
@@ -93,6 +95,28 @@ else
     /boot/firmware/overlays/lcdwiki-mhs3528-native.dtbo
 fi
 
+
+# Install the validated touch mapping/calibration system-wide. Raspberry Pi OS
+# normally uses /etc/xdg/labwc/rc.xml as the default labwc configuration.
+# Existing per-user rc.xml files take precedence, so patch those too while
+# preserving the rest of each user's configuration.
+if [[ -f "$LABWC_GLOBAL" ]]; then
+  LABWC_BACKUP="${LABWC_GLOBAL}.lcdwiki-backup-${STAMP}"
+  cp "$LABWC_GLOBAL" "$LABWC_BACKUP"
+  echo "labwc system config backup: $LABWC_BACKUP"
+  python3 "$ROOT/tools/patch_labwc.py" apply "$LABWC_GLOBAL" "$LABWC_FRAGMENT"
+else
+  echo "Warning: $LABWC_GLOBAL not found; touch calibration was not installed globally."
+fi
+
+while IFS= read -r USER_RC; do
+  [[ "$USER_RC" == "$LABWC_GLOBAL" ]] && continue
+  USER_BACKUP="${USER_RC}.lcdwiki-backup-${STAMP}"
+  cp "$USER_RC" "$USER_BACKUP"
+  python3 "$ROOT/tools/patch_labwc.py" apply "$USER_RC" "$LABWC_FRAGMENT"
+  echo "Updated existing user labwc config: $USER_RC"
+done < <(find /home -mindepth 4 -maxdepth 4 -type f -path '*/.config/labwc/rc.xml' 2>/dev/null || true)
+
 {
   echo
   echo "$BEGIN"
@@ -102,6 +126,7 @@ fi
 
 echo
 echo "Installed profile: $PROFILE"
+echo "Installed validated ADS7846 touch mapping/calibration into the system labwc configuration."
 if [[ "$PROFILE" == "lcdwiki28" ]]; then
   echo "Expected DRM output after reboot: SPI-1, 320x240 @ 60 Hz"
 else

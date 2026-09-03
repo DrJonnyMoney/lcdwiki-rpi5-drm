@@ -58,7 +58,7 @@ lcdwiki,mhs3528
 
 ## Critical reset-polarity finding
 
-The decisive fault was not the LCD initialization sequence or DRM mode. It was reset GPIO polarity.
+The final fault preventing the board-specific MHS3528 DRM module from driving the physical panel was reset GPIO polarity. This was distinct from the generic `panel-mipi-dbi` transport limitation described above.
 
 LCDWiki's legacy Device Tree overlay represents reset polarity using conventions from the older framebuffer driver. Copying its flag directly into a modern gpiod/mipi-dbi driver caused the helper to end with the physical reset line low.
 
@@ -86,7 +86,9 @@ RESET low -> RESET high
 
 and leaves the controller released from reset.
 
-After this change the MHS3528 displayed the Wayland desktop correctly.
+After this change the board-specific MHS3528 DRM module displayed the Wayland desktop correctly.
+
+A later clean retest then applied the corrected reset polarity to generic `panel-mipi-dbi`. That generic driver successfully bound, created `fb0`, and exposed `SPI-1` at 480×320 @ 60 Hz, yet the physical panel remained white. This separated the two issues experimentally: correct reset polarity is necessary, but generic MIPI-DBI SPI transport is still insufficient for this MHS3528 hardware.
 
 ## Validated MHS3528 result
 
@@ -125,6 +127,8 @@ Validated labwc/libinput fine calibration:
 ```text
 1.115 0 -0.052 0 1.106 -0.035
 ```
+
+The installer applies the model-specific calibration as a system-wide labwc default in `/etc/xdg/labwc/rc.xml` and also patches existing per-user labwc configurations that would otherwise take precedence.
 
 ## Architecture
 
