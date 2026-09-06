@@ -115,9 +115,10 @@ if [[ "$PROFILE" == "lcdwiki28" ]]; then
   echo "0.56" > "$STATE_DIR/scale-90-270"
 else
   echo "1.115 0 -0.052 0 1.106 -0.035" > "$STATE_DIR/base-calibration"
-  # Keep the larger 480x320 MHS3528 at native logical scale by default.
+  # Validated MHS3528 desktop defaults. 0/180 have enough workspace at native
+  # scale; 90/270 use 0.74 so the desktop fits comfortably on the narrow edge.
   echo "1.0" > "$STATE_DIR/scale-0-180"
-  echo "1.0" > "$STATE_DIR/scale-90-270"
+  echo "0.74" > "$STATE_DIR/scale-90-270"
 fi
 echo "0" > "$STATE_DIR/rotation"
 install -m 0755 "$ROOT/tools/rotate_display.py" "$LIB_DIR/rotate_display.py"
@@ -181,12 +182,14 @@ else
   echo "Expected DRM output after reboot: SPI-1, 480x320 @ ~60 Hz"
 fi
 if command -v wlr-randr >/dev/null 2>&1; then
-  echo "Rotation command: sudo lcdwiki-rotate 0|90|180|270 (display, touch and scale together)"
+  echo "Rotation command: sudo lcdwiki-rotate 0|90|180|270 (display transform + profile scale; touch stays aligned)"
 else
   echo "Optional rotation support needs wlr-randr: sudo apt install wlr-randr"
 fi
 if [[ "$PROFILE" == "lcdwiki28" ]]; then
   echo "Default scale: 0/180 = 0.67, 90/270 = 0.56."
   echo "KEY1/KEY2/KEY3 are exposed as Linux KEY_PROG1/2/3 input events."
+else
+  echo "Default scale: 0/180 = 1.00, 90/270 = 0.74."
 fi
 echo "Reboot: sudo reboot"

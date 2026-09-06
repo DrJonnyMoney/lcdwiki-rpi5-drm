@@ -279,17 +279,15 @@ The command angles are **physical panel rotations**. The helper translates them 
 
 The angles are clockwise relative to the repository's default orientation. `0` restores the default orientation.
 
-The command keeps three things together:
+The command changes the two orientation-dependent display settings together:
 
 ```text
 wlr-randr output transform
           +
-fixed validated libinput calibration matrix
-          +
 orientation-appropriate desktop scale
 ```
 
-The touchscreen remains mapped to `SPI-1`. On the tested Raspberry Pi OS/labwc setup, the output transform carries the mapped absolute touchscreen with the display, so the model-specific calibration matrix must remain unchanged when the screen is rotated.
+The validated libinput calibration matrix is deliberately left alone. The touchscreen remains mapped to `SPI-1`. On the tested Raspberry Pi OS/labwc setup, the output transform carries the mapped absolute touchscreen with the display, so the model-specific calibration matrix must remain unchanged when the screen is rotated.
 
 The selected angle is stored in:
 
@@ -299,16 +297,16 @@ The selected angle is stored in:
 
 and the project’s system-wide labwc autostart applies it at every desktop login. On the Raspberry Pi OS Bookworm configuration tested for this project, this system-wide rotation persists even when a user has their own `~/.config/labwc/autostart`. You therefore do **not** need to copy the rotation helper into your personal autostart file. If the command is run from an active Wayland desktop using `sudo`, it also attempts to apply the new display transform immediately and reload labwc; otherwise it takes effect on the next login/reboot.
 
-For the validated 2.8-inch profile, rotation also selects a tested desktop scale automatically:
+Each validated profile also selects a tested desktop scale automatically:
 
-| Orientation | Rotation values | Default scale |
+| Profile | Rotation | Default scale |
 |---|---|---:|
-| Rotation | Default scale |
-|---|---:|
-| `0` / `180` | `0.67` |
-| `90` / `270` | `0.56` |
+| LCDWiki 2.8-inch | `0` / `180` | `0.67` |
+| LCDWiki 2.8-inch | `90` / `270` | `0.56` |
+| MHS3528 3.5-inch | `0` / `180` | `1.00` |
+| MHS3528 3.5-inch | `90` / `270` | `0.74` |
 
-These defaults keep the Raspberry Pi taskbar usable on the 320x240 panel. The MHS3528 profile remains at scale `1.0` by default because its larger 480x320 workspace does not need the same reduction.
+These defaults were selected on the physical test displays so the Raspberry Pi desktop and taskbar fit comfortably in each orientation while keeping text and icons as large as practical.
 
 # 2.8-inch hardware buttons
 
@@ -340,11 +338,16 @@ An application can listen for `KEY_PROG1`, `KEY_PROG2` and `KEY_PROG3` without a
 
 Desktop scaling is now part of the display profile rather than a manual post-install step.
 
-For the 2.8-inch display the validated defaults are:
+The validated defaults are:
 
 ```text
+LCDWiki 2.8-inch:
 0 / 180 degrees -> 0.67
 90 / 270 degrees -> 0.56
+
+MHS3528 3.5-inch:
+0 / 180 degrees -> 1.00
+90 / 270 degrees -> 0.74
 ```
 
 The project stores these under:
@@ -360,7 +363,7 @@ and `lcdwiki-apply-rotation` applies the appropriate scale together with the sav
 sudo lcdwiki-rotate 90
 ```
 
-therefore changes the image orientation, touchscreen sense **and** desktop scale as one operation.
+therefore changes the image orientation and desktop scale as one operation. The touchscreen calibration matrix is not rewritten; because the touch device remains mapped to `SPI-1`, it stays aligned with the transformed output.
 
 If you previously added a manual line such as:
 
@@ -370,7 +373,7 @@ wlr-randr --output SPI-1 --scale 0.67
 
 to `~/.config/labwc/autostart`, it is no longer needed and can be removed. The installer preserves unrelated user autostart commands rather than deleting them automatically.
 
-The MHS3528 uses scale `1.0` by default in all orientations.
+For the MHS3528, the validated defaults are `1.00` at `0`/`180` and `0.74` at `90`/`270`.
 
 # SPI speed
 

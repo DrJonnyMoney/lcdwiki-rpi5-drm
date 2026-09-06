@@ -183,4 +183,4 @@ The LCDWiki MPI2801 2.8-inch board also provides three side buttons. LCDWiki map
 
 The 2.8-inch panel was physically tested with the Raspberry Pi desktop in both orientations. Physical testing showed that rotations `90` and `270` need scale `0.56` to keep the taskbar icons inside the narrow edge, while rotations `0` and `180` can use scale `0.67` for larger text and icons. The user-facing 90/270 commands are translated to the opposite wlroots transform numbers so their direction matches the physical panel. These are installed as model defaults and selected automatically by the persistent rotation helper.
 
-The MHS3528 retains scale `1.0` by default because its 480x320 workspace is larger and no reduced scale has been validated as necessary.
+The MHS3528 was subsequently tested in all four orientations. Rotations `0` and `180` are comfortable at native scale `1.00`, while rotations `90` and `270` use scale `0.74` so the desktop and taskbar fit the narrower logical width without making text unnecessarily small. These values are now installed as the MHS3528 profile defaults.
