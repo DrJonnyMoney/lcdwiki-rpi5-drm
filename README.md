@@ -80,16 +80,10 @@ The current MHS3528 installer intentionally checks for a `6.12.x` kernel because
 
 ## Optional touch verification and recalibration tools
 
-For touchscreen/button testing and calibration, install:
+For touchscreen testing and calibration, install:
 
 ```bash
 sudo apt install -y evtest python3-pygame python3-evdev
-```
-
-The Python utilities read Linux `/dev/input/event*` devices. On installations where the desktop user does not already have input-device access, add that user to the `input` group and then log out and back in:
-
-```bash
-sudo usermod -aG input "$USER"
 ```
 
 These packages are only needed during setup, troubleshooting or calibration; they are not required for normal display or touchscreen operation once configuration is complete.
@@ -99,8 +93,6 @@ These packages are only needed during setup, troubleshooting or calibration; the
 - `python3-evdev` allows the calibration utility to read the Linux touchscreen input device directly.
 
 # Installation
-
-The installer is designed to be re-run safely. It replaces only configuration blocks marked as managed by this project, refreshes the selected profile's fixed base touch calibration, removes obsolete per-rotation calibration state from older development versions, and preserves a valid saved display rotation.
 
 Clone the repository:
 
@@ -243,7 +235,7 @@ The Device Tree profiles handle coarse touch orientation. labwc/libinput applies
 2.8-inch:
 
 ```text
-1.143978 0.002659 -0.108423 -0.024877 1.147078 -0.057139
+1.150 0 -0.111 0 1.137 -0.060
 ```
 
 MHS3528 3.5-inch:
@@ -256,32 +248,23 @@ These matrices were measured on the two physical test units. They are used as th
 
 ## Recalibrating another panel
 
-Touch calibration is a **single base calibration at 0°**. You do not need to recalibrate the touchscreen for 90°, 180° or 270° rotations. Because labwc maps the touchscreen to `SPI-1`, it automatically follows the output transform.
-
-First restore the repository's default orientation:
-
-```bash
-sudo lcdwiki-rotate 0
-```
-
-Then run:
+Run:
 
 ```bash
 python3 tools/touch_calibrate_grid.py
 ```
 
-Tap the nine targets carefully with a stylus. The utility calculates the six-value libinput/labwc affine matrix automatically and saves the raw measurements, fitted matrix and fitting error to:
+Use:
 
-```text
-~/touch_calibration_results.txt
-```
+- `320` × `240` for the 2.8-inch display
+- `480` × `320` for the MHS3528
 
-The resulting **0° base matrix is used unchanged for every screen rotation**. If another physical panel needs its own calibration, replace that model's matrix in `profiles/<profile>/labwc-touch.xml` before reinstalling the profile.
+Tap the nine targets carefully with a stylus and use the resulting raw coordinates to derive a replacement libinput affine matrix.
 
 
 # Screen rotation
 
-Rotation is supported for **both** display profiles. The installer adds a system command that rotates the DRM/Wayland output while leaving the touchscreen calibration unchanged.
+Rotation is a supported feature for **both** display profiles. The installer adds a system command that rotates the DRM output while leaving the validated touchscreen calibration matrix unchanged.
 
 Use:
 
@@ -292,9 +275,21 @@ sudo lcdwiki-rotate 180
 sudo lcdwiki-rotate 270
 ```
 
-The angles are **clockwise** relative to the repository's default orientation. `0` restores the default orientation. Internally, Wayland output transforms use the opposite direction, so the helper maps 90° clockwise to transform 270, 180° to 180, and 270° clockwise to transform 90.
+The command angles are **physical panel rotations**. The helper translates them to the corresponding wlroots transform internally, so `90` and `270` match the direction observed on the actual LCDWiki panel.
 
-Only the display output is rotated. The ADS7846 touchscreen keeps the profile's fixed base calibration matrix. This is intentional: the labwc configuration maps the touchscreen with `mapToOutput="SPI-1"`, and labwc automatically follows the current transform of that output. Applying an additional rotated calibration matrix would rotate the touch coordinates a second time.
+The angles are clockwise relative to the repository's default orientation. `0` restores the default orientation.
+
+The command keeps three things together:
+
+```text
+wlr-randr output transform
+          +
+fixed validated libinput calibration matrix
+          +
+orientation-appropriate desktop scale
+```
+
+The touchscreen remains mapped to `SPI-1`. On the tested Raspberry Pi OS/labwc setup, the output transform carries the mapped absolute touchscreen with the display, so the model-specific calibration matrix must remain unchanged when the screen is rotated.
 
 The selected angle is stored in:
 
@@ -302,9 +297,18 @@ The selected angle is stored in:
 /etc/lcdwiki-rpi5-drm/rotation
 ```
 
-and labwc autostart applies it at every desktop login. If `sudo lcdwiki-rotate ...` is run from an active Wayland desktop, the new display transform is also applied immediately.
+and the project’s system-wide labwc autostart applies it at every desktop login. On the Raspberry Pi OS Bookworm configuration tested for this project, this system-wide rotation persists even when a user has their own `~/.config/labwc/autostart`. You therefore do **not** need to copy the rotation helper into your personal autostart file. If the command is run from an active Wayland desktop using `sudo`, it also attempts to apply the new display transform immediately and reload labwc; otherwise it takes effect on the next login/reboot.
 
-Rotation does not change any existing `wlr-randr --scale ...` setting.
+For the validated 2.8-inch profile, rotation also selects a tested desktop scale automatically:
+
+| Orientation | Rotation values | Default scale |
+|---|---|---:|
+| Rotation | Default scale |
+|---|---:|
+| `0` / `180` | `0.67` |
+| `90` / `270` | `0.56` |
+
+These defaults keep the Raspberry Pi taskbar usable on the 320x240 panel. The MHS3528 profile remains at scale `1.0` by default because its larger 480x320 workspace does not need the same reduction.
 
 # 2.8-inch hardware buttons
 
@@ -332,85 +336,41 @@ python3 tools/button_test.py
 
 An application can listen for `KEY_PROG1`, `KEY_PROG2` and `KEY_PROG3` without accessing GPIO directly. This keeps button handling in the normal Linux input stack, alongside the touchscreen.
 
-## Example: button-controlled Pong
+# Desktop scaling
 
-The repository includes a small Pygame example that demonstrates all three buttons. The game is presented in **270° clockwise portrait orientation**, but it does **not** rotate the desktop or modify the system display/touch configuration. Pygame renders the game to an internal 240×320 portrait canvas and rotates the finished frame before displaying it on the 320×240 LCD.
+Desktop scaling is now part of the display profile rather than a manual post-install step.
 
-Install the example dependencies if they are not already present:
-
-```bash
-sudo apt install -y python3-pygame python3-evdev
-```
-
-Launch the game directly with the desktop left in its normal orientation:
-
-```bash
-python3 examples/button_pong.py
-```
-
-Controls:
-
-| Button | Action |
-|---|---|
-| KEY1 | Move paddle left |
-| KEY2 | Restart game |
-| KEY3 | Move paddle right |
-
-The example reads the buttons from the Linux `gpio-keys` input device through `evdev`; it does not access GPIO directly. Left/right arrow keys and `R` are provided as keyboard fallbacks, and `Esc` quits when a keyboard is attached.
-
-Because the rotation is handled entirely inside the application, closing Pong immediately returns to the unchanged desktop orientation. This approach is useful for applications that need a portrait UI without changing the system-wide Wayland output transform.
-
-# Desktop scaling / zoom
-
-The 2.8-inch desktop is very small at native logical scale. A useful starting point is:
-
-```bash
-wlr-randr --output SPI-1 --scale 0.67
-```
-
-This changes the current Wayland session only. To make the desktop scale persistent for the current user, use labwc's user autostart file:
-
-```bash
-mkdir -p ~/.config/labwc
-nano ~/.config/labwc/autostart
-```
-
-If the file already contains the repository-managed rotation block, leave that block intact and add the scale command outside it:
-
-```bash
-# BEGIN lcdwiki-rpi5-drm rotation
-/usr/local/bin/lcdwiki-apply-rotation &
-# END lcdwiki-rpi5-drm rotation
-
-wlr-randr --output SPI-1 --scale 0.67
-```
-
-If you create `~/.config/labwc/autostart` **after** installing this project, add the three-line rotation block above as well as the scale command. A user-specific labwc autostart can take precedence over the system default, so keeping the rotation helper there ensures a saved non-zero `lcdwiki-rotate` setting still persists at login.
-
-Save the file and log out/in or reboot. Re-running `sudo ./install.sh <profile>` is also safe: the installer preserves unrelated autostart commands such as the scale setting and restores its managed rotation block.
-
-For a system-wide default that applies to users who do not provide their own labwc autostart setting, edit:
-
-```bash
-sudo nano /etc/xdg/labwc/autostart
-```
-
-and add the same command:
-
-```bash
-wlr-randr --output SPI-1 --scale 0.67
-```
-
-Choose the value to suit the panel and application. For example:
+For the 2.8-inch display the validated defaults are:
 
 ```text
-1.00   native scale; UI appears largest
-0.80   moderately more desktop area
-0.67   useful starting point for the 2.8-inch display
-0.50   much more desktop area, but text and controls become very small
+0 / 180 degrees -> 0.67
+90 / 270 degrees -> 0.56
 ```
 
-The MHS3528 has more usable desktop area at 480×320 and may not require as aggressive a scale reduction. Screen rotation and scaling are independent: `lcdwiki-rotate` changes only the output transform and leaves the current scale untouched.
+The project stores these under:
+
+```text
+/etc/lcdwiki-rpi5-drm/scale-0-180
+/etc/lcdwiki-rpi5-drm/scale-90-270
+```
+
+and `lcdwiki-apply-rotation` applies the appropriate scale together with the saved display rotation at login. Running, for example:
+
+```bash
+sudo lcdwiki-rotate 90
+```
+
+therefore changes the image orientation, touchscreen sense **and** desktop scale as one operation.
+
+If you previously added a manual line such as:
+
+```bash
+wlr-randr --output SPI-1 --scale 0.67
+```
+
+to `~/.config/labwc/autostart`, it is no longer needed and can be removed. The installer preserves unrelated user autostart commands rather than deleting them automatically.
+
+The MHS3528 uses scale `1.0` by default in all orientations.
 
 # SPI speed
 
@@ -458,9 +418,6 @@ profiles/
     driver/
       Makefile
       make_mhs3528.py
-
-examples/
-  button_pong.py
 
 tools/
   patch_labwc.py

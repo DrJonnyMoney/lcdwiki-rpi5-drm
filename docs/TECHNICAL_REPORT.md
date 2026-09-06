@@ -25,7 +25,7 @@ Touch remained independent on SPI0 CE1 using the stock `ads7846` input driver. D
 Validated fine calibration:
 
 ```text
-1.143978 0.002659 -0.108423 -0.024877 1.147078 -0.057139
+1.150 0 -0.111 0 1.137 -0.060
 ```
 
 ## MHS3528 hardware
@@ -130,8 +130,6 @@ Validated labwc/libinput fine calibration:
 
 The installer applies the model-specific calibration as a system-wide labwc default in `/etc/xdg/labwc/rc.xml` and also patches existing per-user labwc configurations that would otherwise take precedence.
 
-Reinstallation reasserts that fixed base calibration and removes obsolete per-rotation matrix state from earlier development builds. Rotation itself never rewrites the touch matrix.
-
 ## Architecture
 
 ### 2.8-inch
@@ -176,6 +174,13 @@ The project also demonstrates an important migration lesson for older Raspberry 
 
 The initial display bring-up solved only the fixed-orientation graphics and touch path. A reusable board-support package also needs to expose the remaining hardware and keep display transforms coherent with absolute touch coordinates.
 
-Rotation is implemented only at the compositor/output layer with `wlr-randr`. The touchscreen keeps its measured base calibration matrix at every orientation because labwc maps the ADS7846 device to `SPI-1` with `mapToOutput`, which follows the output transform automatically. Empirical testing on the 2.8-inch panel confirmed that additionally rotating the libinput matrix causes a second, incorrect touch rotation. Supported rotations are 0, 90, 180 and 270 degrees clockwise. The chosen angle is stored system-wide and re-applied from labwc autostart. The same arrangement is used for both the ILI9341 `panel-mipi-dbi` profile and the board-specific MHS3528 ILI9486 DRM profile.
+Rotation is implemented at the compositor/output layer with `wlr-randr`. The validated libinput calibration matrix is deliberately left unchanged: with the touchscreen mapped to `SPI-1`, the tested Raspberry Pi OS/labwc stack applies the output transform consistently to the absolute touch device. Supported rotations are 0, 90, 180 and 270 degrees clockwise. The chosen angle is stored system-wide and re-applied from labwc autostart. This keeps the kernel display driver and touch calibration independent of desktop orientation and works for both display profiles.
 
 The LCDWiki MPI2801 2.8-inch board also provides three side buttons. LCDWiki maps these to physical pins 12, 16 and 18, which correspond to GPIO18, GPIO23 and GPIO24. The profile now describes them using the upstream `gpio-keys` driver as `KEY_PROG1`, `KEY_PROG2` and `KEY_PROG3`. No application action is assigned by the driver; the keys are exposed through the standard Linux input subsystem for applications or desktop bindings to consume.
+
+
+## Rotation-aware desktop scaling
+
+The 2.8-inch panel was physically tested with the Raspberry Pi desktop in both orientations. Physical testing showed that rotations `90` and `270` need scale `0.56` to keep the taskbar icons inside the narrow edge, while rotations `0` and `180` can use scale `0.67` for larger text and icons. The user-facing 90/270 commands are translated to the opposite wlroots transform numbers so their direction matches the physical panel. These are installed as model defaults and selected automatically by the persistent rotation helper.
+
+The MHS3528 retains scale `1.0` by default because its 480x320 workspace is larger and no reduced scale has been validated as necessary.

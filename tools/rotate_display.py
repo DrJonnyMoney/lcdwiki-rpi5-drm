@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Persist and, when possible, immediately apply LCDWiki display rotation.
+"""Persist and, when possible, immediately apply LCDWiki display rotation/scale.
 
-Touch calibration is intentionally NOT changed when the display rotates.
-labwc's mapToOutput="SPI-1" maps the absolute touchscreen through the current
-output transform, so each panel keeps one fixed base calibration matrix.
+Touch calibration is intentionally NOT changed here. The touchscreen remains
+mapped to SPI-1 with the model's fixed, measured calibration matrix; labwc/wlroots
+applies the output transform consistently to the mapped absolute input device.
 """
 
 from __future__ import annotations
@@ -17,15 +17,30 @@ from pathlib import Path
 STATE_DIR = Path("/etc/lcdwiki-rpi5-drm")
 PROFILE_FILE = STATE_DIR / "profile"
 ROTATION_FILE = STATE_DIR / "rotation"
-VALID_ANGLES = {0, 90, 180, 270}
+SCALE_0_180_FILE = STATE_DIR / "scale-0-180"
+SCALE_90_270_FILE = STATE_DIR / "scale-90-270"
+
+# User-facing angles are physical rotations as observed on the LCDWiki panel.
+# wlroots' quarter-turn sense is opposite to that physical convention here.
+WLR_TRANSFORM = {0: "normal", 90: "270", 180: "180", 270: "90"}
 
 
-def current_user_session(transform_angle: int) -> bool:
-    """Apply the Wayland transform to the user session that invoked sudo."""
+def scale_for_angle(angle: int) -> str:
+    path = SCALE_0_180_FILE if angle in (0, 180) else SCALE_90_270_FILE
+    if path.exists():
+        value = path.read_text().strip()
+        try:
+            float(value)
+            return value
+        except ValueError:
+            pass
+    return "1.0"
+
+
+def current_user_session(angle: int, scale: str) -> bool:
     user = os.environ.get("SUDO_USER")
     if not user or user == "root":
         return False
-
     try:
         pw = pwd.getpwnam(user)
     except KeyError:
@@ -35,28 +50,20 @@ def current_user_session(transform_angle: int) -> bool:
     if not runtime.is_dir():
         return False
 
-    sockets = sorted(
-        p for p in runtime.glob("wayland-*")
-        if not p.name.endswith(".lock")
-    )
+    sockets = [p for p in runtime.glob("wayland-*") if not p.name.endswith(".lock")]
     if not sockets:
         return False
 
-    transform = "normal" if transform_angle == 0 else str(transform_angle)
     cmd = [
         "runuser", "-u", user, "--", "env",
         f"XDG_RUNTIME_DIR={runtime}",
         f"WAYLAND_DISPLAY={sockets[0].name}",
-        "wlr-randr", "--output", "SPI-1", "--transform", transform,
+        "wlr-randr", "--output", "SPI-1",
+        "--transform", WLR_TRANSFORM[angle],
+        "--scale", scale,
     ]
-
     try:
-        subprocess.run(
-            cmd,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except (FileNotFoundError, subprocess.CalledProcessError):
         return False
@@ -66,7 +73,6 @@ def main() -> int:
     if os.geteuid() != 0:
         print("Run with sudo: sudo lcdwiki-rotate 0|90|180|270", file=sys.stderr)
         return 1
-
     if len(sys.argv) != 2:
         print("Usage: sudo lcdwiki-rotate 0|90|180|270", file=sys.stderr)
         return 1
@@ -76,26 +82,22 @@ def main() -> int:
     except ValueError:
         angle = -1
 
-    if angle not in VALID_ANGLES:
+    if angle not in WLR_TRANSFORM:
         print("Rotation must be one of: 0, 90, 180, 270", file=sys.stderr)
         return 1
-
     if not PROFILE_FILE.exists():
         print("LCDWiki driver state not found. Install a display profile first.", file=sys.stderr)
         return 1
 
-    # Public angles are clockwise. wl_output transform angles are CCW.
-    transform_angle = (-angle) % 360
-
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     ROTATION_FILE.write_text(f"{angle}\n")
 
-    # Only the display output rotates. Touch stays on the profile's fixed base
-    # calibration because labwc mapToOutput tracks the SPI-1 output transform.
-    live = current_user_session(transform_angle)
+    scale = scale_for_angle(angle)
+    live = current_user_session(angle, scale)
 
-    print(f"LCDWiki rotation set to {angle} degrees clockwise.")
-    print("Touch calibration unchanged; labwc mapToOutput follows the output transform.")
+    print(f"LCDWiki rotation set to {angle} degrees.")
+    print(f"LCDWiki scale set to {scale} for this orientation.")
+    print("Touch calibration unchanged; it remains mapped to SPI-1.")
     if live:
         print("Display transform applied to the current Wayland session.")
     else:

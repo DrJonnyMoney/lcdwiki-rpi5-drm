@@ -105,27 +105,21 @@ fi
 # Install model metadata and rotation helpers. Rotation is compositor-level, so
 # the same mechanism works for both native DRM display profiles.
 mkdir -p "$STATE_DIR" "$LIB_DIR"
-
-# Preserve a valid user-selected rotation across reinstalls/upgrades. A first
-# install, invalid old state, or legacy install without state starts at 0°.
-SAVED_ROTATION=0
-if [[ -r "$STATE_DIR/rotation" ]]; then
-  case "$(cat "$STATE_DIR/rotation")" in
-    0|90|180|270) SAVED_ROTATION="$(cat "$STATE_DIR/rotation")" ;;
-  esac
-fi
-
 echo "$PROFILE" > "$STATE_DIR/profile"
 if [[ "$PROFILE" == "lcdwiki28" ]]; then
-  echo "1.143978 0.002659 -0.108423 -0.024877 1.147078 -0.057139" > "$STATE_DIR/base-calibration"
+  echo "1.150 0 -0.111 0 1.137 -0.060" > "$STATE_DIR/base-calibration"
+  # Validated desktop defaults for the 320x240 panel. The repository's
+  # Physical testing: 90/270 need the smaller scale to keep the taskbar
+  # inside the narrow edge; 0/180 can use the larger 0.67 scale.
+  echo "0.67" > "$STATE_DIR/scale-0-180"
+  echo "0.56" > "$STATE_DIR/scale-90-270"
 else
   echo "1.115 0 -0.052 0 1.106 -0.035" > "$STATE_DIR/base-calibration"
+  # Keep the larger 480x320 MHS3528 at native logical scale by default.
+  echo "1.0" > "$STATE_DIR/scale-0-180"
+  echo "1.0" > "$STATE_DIR/scale-90-270"
 fi
-echo "$SAVED_ROTATION" > "$STATE_DIR/rotation"
-
-# Obsolete state from the experimental per-rotation calibration implementation.
-# Current versions use one fixed base touch matrix for every output rotation.
-rm -f "$STATE_DIR/rotation-matrices"
+echo "0" > "$STATE_DIR/rotation"
 install -m 0755 "$ROOT/tools/rotate_display.py" "$LIB_DIR/rotate_display.py"
 install -m 0755 "$ROOT/tools/apply_rotation.sh" "$APPLY_ROT_BIN"
 cat > "$ROTATE_BIN" <<'ROTATE_EOF'
@@ -187,11 +181,12 @@ else
   echo "Expected DRM output after reboot: SPI-1, 480x320 @ ~60 Hz"
 fi
 if command -v wlr-randr >/dev/null 2>&1; then
-  echo "Rotation command: sudo lcdwiki-rotate 0|90|180|270"
+  echo "Rotation command: sudo lcdwiki-rotate 0|90|180|270 (display, touch and scale together)"
 else
   echo "Optional rotation support needs wlr-randr: sudo apt install wlr-randr"
 fi
 if [[ "$PROFILE" == "lcdwiki28" ]]; then
+  echo "Default scale: 0/180 = 0.67, 90/270 = 0.56."
   echo "KEY1/KEY2/KEY3 are exposed as Linux KEY_PROG1/2/3 input events."
 fi
 echo "Reboot: sudo reboot"
