@@ -1,0 +1,82 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * LCDWiki MPI2801 2.8-inch board support.
+ *
+ * SPI0 CE1: XPT2046 / ADS7846-compatible resistive touch controller
+ * GPIO18/23/24: KEY1/KEY2/KEY3 exposed through Linux gpio-keys
+ */
+
+/ {
+    compatible = "brcm,bcm2712", "brcm,bcm2835";
+
+    fragment@0 {
+        target = <&spi0>;
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            touchscreen@1 {
+                compatible = "ti,ads7846";
+                reg = <1>;
+                spi-max-frequency = <2000000>;
+
+                interrupt-parent = <&gpio>;
+                interrupts = <17 2>;
+                pendown-gpio = <&gpio 17 1>;
+
+                ti,x-plate-ohms = /bits/ 16 <60>;
+                ti,pressure-max = /bits/ 16 <255>;
+
+                touchscreen-swapped-x-y;
+                touchscreen-inverted-y;
+
+                status = "okay";
+            };
+        };
+    };
+
+    fragment@1 {
+        target = <&gpio>;
+        __overlay__ {
+            lcdwiki_button_pins: lcdwiki-button-pins {
+                function = "gpio";
+                pins = "gpio18", "gpio23", "gpio24";
+                bias-pull-up;
+            };
+        };
+    };
+
+    fragment@2 {
+        target-path = "/";
+        __overlay__ {
+            lcdwiki_buttons: lcdwiki-buttons {
+                compatible = "gpio-keys";
+                pinctrl-names = "default";
+                pinctrl-0 = <&lcdwiki_button_pins>;
+
+                key1 {
+                    label = "LCDWiki KEY1";
+                    linux,code = <148>; /* KEY_PROG1 */
+                    gpios = <&gpio 18 1>; /* GPIO_ACTIVE_LOW */
+                    debounce-interval = <20>;
+                };
+
+                key2 {
+                    label = "LCDWiki KEY2";
+                    linux,code = <149>; /* KEY_PROG2 */
+                    gpios = <&gpio 23 1>; /* GPIO_ACTIVE_LOW */
+                    debounce-interval = <20>;
+                };
+
+                key3 {
+                    label = "LCDWiki KEY3";
+                    linux,code = <202>; /* KEY_PROG3 */
+                    gpios = <&gpio 24 1>; /* GPIO_ACTIVE_LOW */
+                    debounce-interval = <20>;
+                };
+            };
+        };
+    };
+};

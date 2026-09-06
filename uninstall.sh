@@ -27,12 +27,24 @@ while IFS= read -r USER_RC; do
   python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/patch_labwc.py" remove "$USER_RC"
 done < <(find /home -mindepth 4 -maxdepth 4 -type f -path '*/.config/labwc/rc.xml' 2>/dev/null || true)
 
+
+# Remove only the rotation block managed by this project.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f /etc/xdg/labwc/autostart ]]; then
+  python3 "$ROOT/tools/patch_autostart.py" remove /etc/xdg/labwc/autostart
+fi
+while IFS= read -r USER_AUTO; do
+  python3 "$ROOT/tools/patch_autostart.py" remove "$USER_AUTO"
+done < <(find /home -mindepth 4 -maxdepth 4 -type f -path '*/.config/labwc/autostart' 2>/dev/null || true)
+rm -rf /etc/lcdwiki-rpi5-drm /usr/local/lib/lcdwiki-rpi5-drm
+rm -f /usr/local/bin/lcdwiki-rotate /usr/local/bin/lcdwiki-apply-rotation
+
 rm -f /boot/firmware/overlays/lcdwiki-touch.dtbo
+rm -f /boot/firmware/overlays/lcdwiki28-io.dtbo
 rm -f /boot/firmware/overlays/lcdwiki-mhs3528-native.dtbo
 rm -f /lib/firmware/panel.bin
 
-KVER="$(uname -r)"
-rm -f "/lib/modules/$KVER/extra/mhs3528_drm.ko"
+find /lib/modules -type f -path '*/extra/mhs3528_drm.ko' -delete 2>/dev/null || true
 depmod -a || true
 
 echo "Removed lcdwiki-rpi5-drm managed configuration and installed driver files."

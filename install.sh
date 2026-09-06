@@ -20,6 +20,11 @@ P="$ROOT/profiles/$PROFILE"
 BOOTCFG="/boot/firmware/config.txt"
 LABWC_GLOBAL="/etc/xdg/labwc/rc.xml"
 LABWC_FRAGMENT="$P/labwc-touch.xml"
+STATE_DIR="/etc/lcdwiki-rpi5-drm"
+LIB_DIR="/usr/local/lib/lcdwiki-rpi5-drm"
+ROTATE_BIN="/usr/local/bin/lcdwiki-rotate"
+APPLY_ROT_BIN="/usr/local/bin/lcdwiki-apply-rotation"
+LABWC_AUTOSTART="/etc/xdg/labwc/autostart"
 
 [[ -f "$BOOTCFG" ]] || { echo "Expected $BOOTCFG (Raspberry Pi OS Bookworm)."; exit 1; }
 command -v dtc >/dev/null || { echo "Install: sudo apt install device-tree-compiler"; exit 1; }
@@ -45,9 +50,9 @@ p.write_text(s.rstrip()+"\n")
 PY
 
 if [[ "$PROFILE" == "lcdwiki28" ]]; then
-  echo "Compiling LCDWiki 2.8-inch touch overlay..."
-  dtc -@ -I dts -O dtb -o /tmp/lcdwiki-touch.dtbo "$P/touch-overlay.dts"
-  install -m 0644 /tmp/lcdwiki-touch.dtbo /boot/firmware/overlays/lcdwiki-touch.dtbo
+  echo "Compiling LCDWiki 2.8-inch touch + button overlay..."
+  dtc -@ -I dts -O dtb -o /tmp/lcdwiki28-io.dtbo "$P/overlay.dts"
+  install -m 0644 /tmp/lcdwiki28-io.dtbo /boot/firmware/overlays/lcdwiki28-io.dtbo
 
   echo "Installing ILI9341 panel firmware..."
   install -m 0644 "$P/panel.bin" /lib/firmware/panel.bin
@@ -96,6 +101,55 @@ else
 fi
 
 
+
+# Install model metadata and rotation helpers. Rotation is compositor-level, so
+# the same mechanism works for both native DRM display profiles.
+mkdir -p "$STATE_DIR" "$LIB_DIR"
+
+# Preserve a valid user-selected rotation across reinstalls/upgrades. A first
+# install, invalid old state, or legacy install without state starts at 0°.
+SAVED_ROTATION=0
+if [[ -r "$STATE_DIR/rotation" ]]; then
+  case "$(cat "$STATE_DIR/rotation")" in
+    0|90|180|270) SAVED_ROTATION="$(cat "$STATE_DIR/rotation")" ;;
+  esac
+fi
+
+echo "$PROFILE" > "$STATE_DIR/profile"
+if [[ "$PROFILE" == "lcdwiki28" ]]; then
+  echo "1.143978 0.002659 -0.108423 -0.024877 1.147078 -0.057139" > "$STATE_DIR/base-calibration"
+else
+  echo "1.115 0 -0.052 0 1.106 -0.035" > "$STATE_DIR/base-calibration"
+fi
+echo "$SAVED_ROTATION" > "$STATE_DIR/rotation"
+
+# Obsolete state from the experimental per-rotation calibration implementation.
+# Current versions use one fixed base touch matrix for every output rotation.
+rm -f "$STATE_DIR/rotation-matrices"
+install -m 0755 "$ROOT/tools/rotate_display.py" "$LIB_DIR/rotate_display.py"
+install -m 0755 "$ROOT/tools/apply_rotation.sh" "$APPLY_ROT_BIN"
+cat > "$ROTATE_BIN" <<'ROTATE_EOF'
+#!/bin/bash
+exec python3 /usr/local/lib/lcdwiki-rpi5-drm/rotate_display.py "$@"
+ROTATE_EOF
+chmod 0755 "$ROTATE_BIN"
+
+# Persist the selected rotation in labwc. A user-specific XDG config can take
+# precedence over the system file, so patch the global default and any existing
+# per-user autostart files while preserving everything else.
+mkdir -p "$(dirname "$LABWC_AUTOSTART")"
+[[ -f "$LABWC_AUTOSTART" ]] || touch "$LABWC_AUTOSTART"
+AUTOSTART_BACKUP="${LABWC_AUTOSTART}.lcdwiki-backup-${STAMP}"
+cp "$LABWC_AUTOSTART" "$AUTOSTART_BACKUP"
+python3 "$ROOT/tools/patch_autostart.py" apply "$LABWC_AUTOSTART"
+
+while IFS= read -r USER_AUTO; do
+  USER_AUTO_BACKUP="${USER_AUTO}.lcdwiki-backup-${STAMP}"
+  cp "$USER_AUTO" "$USER_AUTO_BACKUP"
+  python3 "$ROOT/tools/patch_autostart.py" apply "$USER_AUTO"
+  echo "Updated existing user labwc autostart: $USER_AUTO"
+done < <(find /home -mindepth 4 -maxdepth 4 -type f -path '*/.config/labwc/autostart' 2>/dev/null || true)
+
 # Install the validated touch mapping/calibration system-wide. Raspberry Pi OS
 # normally uses /etc/xdg/labwc/rc.xml as the default labwc configuration.
 # Existing per-user rc.xml files take precedence, so patch those too while
@@ -131,5 +185,13 @@ if [[ "$PROFILE" == "lcdwiki28" ]]; then
   echo "Expected DRM output after reboot: SPI-1, 320x240 @ 60 Hz"
 else
   echo "Expected DRM output after reboot: SPI-1, 480x320 @ ~60 Hz"
+fi
+if command -v wlr-randr >/dev/null 2>&1; then
+  echo "Rotation command: sudo lcdwiki-rotate 0|90|180|270"
+else
+  echo "Optional rotation support needs wlr-randr: sudo apt install wlr-randr"
+fi
+if [[ "$PROFILE" == "lcdwiki28" ]]; then
+  echo "KEY1/KEY2/KEY3 are exposed as Linux KEY_PROG1/2/3 input events."
 fi
 echo "Reboot: sudo reboot"

@@ -2,6 +2,6 @@
 
   <libinput>
     <device category="ADS7846 Touchscreen">
-      <calibrationMatrix>1.150 0 -0.111 0 1.137 -0.060</calibrationMatrix>
+      <calibrationMatrix>1.143978 0.002659 -0.108423 -0.024877 1.147078 -0.057139</calibrationMatrix>
     </device>
   </libinput>

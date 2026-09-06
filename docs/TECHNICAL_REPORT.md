@@ -25,7 +25,7 @@ Touch remained independent on SPI0 CE1 using the stock `ads7846` input driver. D
 Validated fine calibration:
 
 ```text
-1.150 0 -0.111 0 1.137 -0.060
+1.143978 0.002659 -0.108423 -0.024877 1.147078 -0.057139
 ```
 
 ## MHS3528 hardware
@@ -130,6 +130,8 @@ Validated labwc/libinput fine calibration:
 
 The installer applies the model-specific calibration as a system-wide labwc default in `/etc/xdg/labwc/rc.xml` and also patches existing per-user labwc configurations that would otherwise take precedence.
 
+Reinstallation reasserts that fixed base calibration and removes obsolete per-rotation matrix state from earlier development builds. Rotation itself never rewrites the touch matrix.
+
 ## Architecture
 
 ### 2.8-inch
@@ -169,3 +171,11 @@ SPI0 CE1
 Both displays now operate without replacing the Raspberry Pi 5's modern desktop stack. This preserves normal Wayland behaviour, native DRM output enumeration and session mirroring while still supporting the resistive touchscreen.
 
 The project also demonstrates an important migration lesson for older Raspberry Pi display overlays: GPIO polarity flags from legacy drivers must not be assumed to have identical semantics when ported to modern descriptor-based GPIO APIs.
+
+## Rotation and board controls
+
+The initial display bring-up solved only the fixed-orientation graphics and touch path. A reusable board-support package also needs to expose the remaining hardware and keep display transforms coherent with absolute touch coordinates.
+
+Rotation is implemented only at the compositor/output layer with `wlr-randr`. The touchscreen keeps its measured base calibration matrix at every orientation because labwc maps the ADS7846 device to `SPI-1` with `mapToOutput`, which follows the output transform automatically. Empirical testing on the 2.8-inch panel confirmed that additionally rotating the libinput matrix causes a second, incorrect touch rotation. Supported rotations are 0, 90, 180 and 270 degrees clockwise. The chosen angle is stored system-wide and re-applied from labwc autostart. The same arrangement is used for both the ILI9341 `panel-mipi-dbi` profile and the board-specific MHS3528 ILI9486 DRM profile.
+
+The LCDWiki MPI2801 2.8-inch board also provides three side buttons. LCDWiki maps these to physical pins 12, 16 and 18, which correspond to GPIO18, GPIO23 and GPIO24. The profile now describes them using the upstream `gpio-keys` driver as `KEY_PROG1`, `KEY_PROG2` and `KEY_PROG3`. No application action is assigned by the driver; the keys are exposed through the standard Linux input subsystem for applications or desktop bindings to consume.

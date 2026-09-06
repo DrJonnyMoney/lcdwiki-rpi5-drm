@@ -67,7 +67,7 @@ Install the basic build tools:
 
 ```bash
 sudo apt update
-sudo apt install -y device-tree-compiler
+sudo apt install -y device-tree-compiler wlr-randr
 ```
 
 For the MHS3528 profile also install:
@@ -80,10 +80,16 @@ The current MHS3528 installer intentionally checks for a `6.12.x` kernel because
 
 ## Optional touch verification and recalibration tools
 
-For touchscreen testing and calibration, install:
+For touchscreen/button testing and calibration, install:
 
 ```bash
 sudo apt install -y evtest python3-pygame python3-evdev
+```
+
+The Python utilities read Linux `/dev/input/event*` devices. On installations where the desktop user does not already have input-device access, add that user to the `input` group and then log out and back in:
+
+```bash
+sudo usermod -aG input "$USER"
 ```
 
 These packages are only needed during setup, troubleshooting or calibration; they are not required for normal display or touchscreen operation once configuration is complete.
@@ -94,12 +100,14 @@ These packages are only needed during setup, troubleshooting or calibration; the
 
 # Installation
 
+The installer is designed to be re-run safely. It replaces only configuration blocks marked as managed by this project, refreshes the selected profile's fixed base touch calibration, removes obsolete per-rotation calibration state from older development versions, and preserves a valid saved display rotation.
+
 Clone the repository:
 
 ```bash
 git clone https://github.com/DrJonnyMoney/lcdwiki-rpi5-drm.git
 cd lcdwiki-rpi5-drm
-chmod +x install.sh uninstall.sh tools/touch_calibrate_grid.py
+chmod +x install.sh uninstall.sh rotate.sh tools/touch_calibrate_grid.py tools/button_test.py
 ```
 
 ## LCDWiki 2.8-inch
@@ -127,6 +135,9 @@ The 2.8-inch profile uses:
 - LCD D/C: GPIO22
 - LCD reset: GPIO27
 - touch IRQ: GPIO17
+- KEY1: physical pin 12 / GPIO18
+- KEY2: physical pin 16 / GPIO23
+- KEY3: physical pin 18 / GPIO24
 
 ## LCDWiki MHS3528 3.5-inch
 
@@ -232,7 +243,7 @@ The Device Tree profiles handle coarse touch orientation. labwc/libinput applies
 2.8-inch:
 
 ```text
-1.150 0 -0.111 0 1.137 -0.060
+1.143978 0.002659 -0.108423 -0.024877 1.147078 -0.057139
 ```
 
 MHS3528 3.5-inch:
@@ -245,20 +256,111 @@ These matrices were measured on the two physical test units. They are used as th
 
 ## Recalibrating another panel
 
-Run:
+Touch calibration is a **single base calibration at 0°**. You do not need to recalibrate the touchscreen for 90°, 180° or 270° rotations. Because labwc maps the touchscreen to `SPI-1`, it automatically follows the output transform.
+
+First restore the repository's default orientation:
+
+```bash
+sudo lcdwiki-rotate 0
+```
+
+Then run:
 
 ```bash
 python3 tools/touch_calibrate_grid.py
 ```
 
+Tap the nine targets carefully with a stylus. The utility calculates the six-value libinput/labwc affine matrix automatically and saves the raw measurements, fitted matrix and fitting error to:
+
+```text
+~/touch_calibration_results.txt
+```
+
+The resulting **0° base matrix is used unchanged for every screen rotation**. If another physical panel needs its own calibration, replace that model's matrix in `profiles/<profile>/labwc-touch.xml` before reinstalling the profile.
+
+
+# Screen rotation
+
+Rotation is supported for **both** display profiles. The installer adds a system command that rotates the DRM/Wayland output while leaving the touchscreen calibration unchanged.
+
 Use:
 
-- `320` × `240` for the 2.8-inch display
-- `480` × `320` for the MHS3528
+```bash
+sudo lcdwiki-rotate 0
+sudo lcdwiki-rotate 90
+sudo lcdwiki-rotate 180
+sudo lcdwiki-rotate 270
+```
 
-Tap the nine targets carefully with a stylus and use the resulting raw coordinates to derive a replacement libinput affine matrix.
+The angles are **clockwise** relative to the repository's default orientation. `0` restores the default orientation. Internally, Wayland output transforms use the opposite direction, so the helper maps 90° clockwise to transform 270, 180° to 180, and 270° clockwise to transform 90.
 
-# Desktop scaling
+Only the display output is rotated. The ADS7846 touchscreen keeps the profile's fixed base calibration matrix. This is intentional: the labwc configuration maps the touchscreen with `mapToOutput="SPI-1"`, and labwc automatically follows the current transform of that output. Applying an additional rotated calibration matrix would rotate the touch coordinates a second time.
+
+The selected angle is stored in:
+
+```text
+/etc/lcdwiki-rpi5-drm/rotation
+```
+
+and labwc autostart applies it at every desktop login. If `sudo lcdwiki-rotate ...` is run from an active Wayland desktop, the new display transform is also applied immediately.
+
+Rotation does not change any existing `wlr-randr --scale ...` setting.
+
+# 2.8-inch hardware buttons
+
+The LCDWiki MPI2801 board has three physical buttons on its right-hand side. LCDWiki documents them as KEY1, KEY2 and KEY3 on physical header pins 12, 16 and 18 respectively. This project exposes them through Linux's native `gpio-keys` driver:
+
+| Board button | Physical pin | GPIO | Linux key event |
+|---|---:|---:|---|
+| KEY1 | 12 | GPIO18 | `KEY_PROG1` |
+| KEY2 | 16 | GPIO23 | `KEY_PROG2` |
+| KEY3 | 18 | GPIO24 | `KEY_PROG3` |
+
+The driver deliberately does **not** assign actions such as shutdown, back or exit. They are general-purpose buttons and are exposed as ordinary Linux input events so applications can decide what they mean.
+
+After installing the `lcdwiki28` profile, verify them with:
+
+```bash
+sudo evtest
+```
+
+or, if `python3-evdev` is installed:
+
+```bash
+python3 tools/button_test.py
+```
+
+An application can listen for `KEY_PROG1`, `KEY_PROG2` and `KEY_PROG3` without accessing GPIO directly. This keeps button handling in the normal Linux input stack, alongside the touchscreen.
+
+## Example: button-controlled Pong
+
+The repository includes a small Pygame example that demonstrates all three buttons. The game is presented in **270° clockwise portrait orientation**, but it does **not** rotate the desktop or modify the system display/touch configuration. Pygame renders the game to an internal 240×320 portrait canvas and rotates the finished frame before displaying it on the 320×240 LCD.
+
+Install the example dependencies if they are not already present:
+
+```bash
+sudo apt install -y python3-pygame python3-evdev
+```
+
+Launch the game directly with the desktop left in its normal orientation:
+
+```bash
+python3 examples/button_pong.py
+```
+
+Controls:
+
+| Button | Action |
+|---|---|
+| KEY1 | Move paddle left |
+| KEY2 | Restart game |
+| KEY3 | Move paddle right |
+
+The example reads the buttons from the Linux `gpio-keys` input device through `evdev`; it does not access GPIO directly. Left/right arrow keys and `R` are provided as keyboard fallbacks, and `Esc` quits when a keyboard is attached.
+
+Because the rotation is handled entirely inside the application, closing Pong immediately returns to the unchanged desktop orientation. This approach is useful for applications that need a portrait UI without changing the system-wide Wayland output transform.
+
+# Desktop scaling / zoom
 
 The 2.8-inch desktop is very small at native logical scale. A useful starting point is:
 
@@ -266,7 +368,49 @@ The 2.8-inch desktop is very small at native logical scale. A useful starting po
 wlr-randr --output SPI-1 --scale 0.67
 ```
 
-The MHS3528 has more usable desktop area at 480×320 and may not require as aggressive a scale reduction.
+This changes the current Wayland session only. To make the desktop scale persistent for the current user, use labwc's user autostart file:
+
+```bash
+mkdir -p ~/.config/labwc
+nano ~/.config/labwc/autostart
+```
+
+If the file already contains the repository-managed rotation block, leave that block intact and add the scale command outside it:
+
+```bash
+# BEGIN lcdwiki-rpi5-drm rotation
+/usr/local/bin/lcdwiki-apply-rotation &
+# END lcdwiki-rpi5-drm rotation
+
+wlr-randr --output SPI-1 --scale 0.67
+```
+
+If you create `~/.config/labwc/autostart` **after** installing this project, add the three-line rotation block above as well as the scale command. A user-specific labwc autostart can take precedence over the system default, so keeping the rotation helper there ensures a saved non-zero `lcdwiki-rotate` setting still persists at login.
+
+Save the file and log out/in or reboot. Re-running `sudo ./install.sh <profile>` is also safe: the installer preserves unrelated autostart commands such as the scale setting and restores its managed rotation block.
+
+For a system-wide default that applies to users who do not provide their own labwc autostart setting, edit:
+
+```bash
+sudo nano /etc/xdg/labwc/autostart
+```
+
+and add the same command:
+
+```bash
+wlr-randr --output SPI-1 --scale 0.67
+```
+
+Choose the value to suit the panel and application. For example:
+
+```text
+1.00   native scale; UI appears largest
+0.80   moderately more desktop area
+0.67   useful starting point for the 2.8-inch display
+0.50   much more desktop area, but text and controls become very small
+```
+
+The MHS3528 has more usable desktop area at 480×320 and may not require as aggressive a scale reduction. Screen rotation and scaling are independent: `lcdwiki-rotate` changes only the output transform and leaves the current scale untouched.
 
 # SPI speed
 
@@ -303,7 +447,7 @@ profiles/
   lcdwiki28/
     panel.txt
     panel.bin
-    touch-overlay.dts
+    overlay.dts
     labwc-touch.xml
     config.txt.snippet
 
@@ -315,9 +459,18 @@ profiles/
       Makefile
       make_mhs3528.py
 
+examples/
+  button_pong.py
+
 tools/
   patch_labwc.py
+  patch_autostart.py
+  rotate_display.py
+  apply_rotation.sh
   touch_calibrate_grid.py
+  button_test.py
+
+rotate.sh
 
 docs/
   TECHNICAL_REPORT.md
@@ -333,7 +486,7 @@ sudo ./uninstall.sh
 sudo reboot
 ```
 
-The installer backs up `/boot/firmware/config.txt` before modifying its managed block.
+The installer backs up `/boot/firmware/config.txt` before modifying its managed block. It also removes the managed labwc touch/rotation configuration, installed rotation helpers, display overlays/firmware and any installed MHS3528 module copies during uninstall. Backup files are retained as a safety net rather than restored automatically.
 
 # Important
 
